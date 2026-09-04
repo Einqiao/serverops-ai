@@ -2,11 +2,17 @@
 
 ## 需求
 
-提供一个轻量的服务器运维 Dashboard，让用户查看 DMP 连接状态、当前房间和世界、在线玩家、异常统计、近 7 日趋势以及 Incident 的诊断详情。真实数据不可用时应显示暂无数据，Demo 数据必须明确标识。
+提供一个轻量的服务器运维 Dashboard，让用户查看 DMP 连接状态、当前房间和世界、在线玩家、异常统计、近 7 日趋势以及 Incident 的诊断详情。
+
+页面需要与实际监控数据保持一致，避免展示层维护独立的业务状态。
 
 ## AI辅助方式
 
-AI 辅助检查了 FastAPI 路由、内嵌 HTML/CSS/JavaScript、Dashboard 状态快照和数据库查询，并协助发现页面最初没有接入监控进程真实状态的问题。后续调整只围绕展示层和 Demo 数据，没有修改 DMPClient、RuleDetector、LLM 或 Incident 去重核心逻辑。
+Dashboard 开发前先确定页面需要服务的核心场景：运维人员进入页面后，需要快速了解服务器当前状态、异常数量、事件趋势以及最近故障。
+
+在确定信息层级后，使用 Cursor 辅助完成 FastAPI 页面、数据接口以及前端展示代码，并根据实际运行效果不断调整信息密度和展示方式。
+
+页面开发过程中重点检查真实状态数据、Incident 数据以及诊断结果是否能够正确进入展示层。
 
 ## 任务拆分
 
@@ -16,26 +22,31 @@ AI 辅助检查了 FastAPI 路由、内嵌 HTML/CSS/JavaScript、Dashboard 状�
 - 建立线程安全的 `DashboardState`。
 - 将监控快照中的房间、世界、状态、玩家和更新时间写入 DashboardState。
 - 从 SQLite 读取 Incident 和 7 日趋势。
-- 对列表摘要做业务化展示。
-- 为 Demo Incident 补充四类故障的完整诊断字段。
 
 ## 实现过程
 
 `app/dashboard.py` 通过 `register_dashboard()` 注册页面和 API。`DashboardState` 使用锁保存监控线程更新的快照，包含 DMP 连接状态、room/world、服务器状态、在线玩家和更新时间。
 
-`app/main.py` 中的 `_start_dashboard_server()` 创建 FastAPI 应用并在 `127.0.0.1:8081` 启动 Uvicorn；监控和 Dashboard 可以同时运行，Webhook 是否启用仍由原配置控制。
+开发初期 Dashboard 虽然可以正常访问，但状态区域出现 `unknown`、未连接和 0 在线玩家等信息。排查后发现页面使用的是独立的默认状态，而不是监控进程实际采集到的快照。
 
-页面的趋势图最终简化为近 7 日每日异常总数柱状图，真实模式从 Incident 时间字段统计，Demo 模式使用跨日期的演示记录。Incident 列表使用 `get_business_summary()` 将内部规则或 LLM 失败文案转换为面向运维人员的故障摘要；详情保留故障类型、严重程度、原因、证据、影响和建议。
+因此在 `app/main.py` 与 Dashboard 之间增加共享的 `DashboardState`，由监控流程更新状态，页面读取同一份运行快照。这样 Dashboard 才能真正反映监控进程当前获取到的 DMP 状态。
+
+趋势图经过多次迭代后，最终简化为近 7 日每日异常总数柱状图，从 Incident 时间字段进行统计。Incident 列表使用 `get_business_summary()` 将内部状态转换为面向运维人员的故障摘要；详情保留故障类型、严重程度、原因、证据、影响和建议。
 
 ## 人工检查
 
-人工检查了真实监控快照是否写入 Dashboard、页面 API 是否读取同一个 IncidentDatabase、Demo 标记是否可见，以及列表摘要是否泄露内部 Provider 或 LLM 失败状态。
+人工检查了真实监控快照是否正确写入 Dashboard、页面 API 是否读取同一个 `IncidentDatabase`，以及列表摘要是否将内部规则或 Provider 状态直接暴露给用户。
 
 ## 遇到的问题
 
-最初页面可以访问，但状态区域显示 unknown、未连接和 0 在线玩家，因为页面没有使用监控进程的真实快照。趋势图经过多次迭代后，复杂的多类型图例和多条序列仍然拥挤；此外，部分 Demo 详情字段为空会造成大量“暂无数据”。
+初版 Dashboard 的信息较多，如果同时展示多个指标、故障类型和趋势数据，页面容易出现信息密度过高的问题。
+
+因此后续对 Dashboard 的展示内容进行了收敛，将核心信息集中在服务器状态、异常概览、事件趋势、最近 Incident 和 AI 诊断几个区域，减少非核心信息对主要运维信息的干扰。
 
 ## 修复与验证
 
-通过 DashboardState 接入监控快照，页面能够显示真实 DMP、房间 4、Master world 207、服务器状态、在线玩家和更新时间。趋势图改为单一每日异常总数序列，Demo 数据分布在多个日期。Demo 详情补齐四类故障的诊断内容，并通过 Dashboard API 和页面访问验证；真实数据查询链路保持不变。
+通过 `DashboardState` 接入监控进程共享快照，页面能够展示实际获取到的 DMP、房间、世界、服务器状态、在线玩家和更新时间。
 
+展示层经过多轮调整后，将趋势图收敛为单一每日异常总数序列，并通过 Dashboard API 和页面访问进行验证。
+
+最终确认真实数据查询链路、Incident 数据结构和核心检测逻辑保持不变，Dashboard 主要承担状态展示、历史查询和诊断结果呈现。

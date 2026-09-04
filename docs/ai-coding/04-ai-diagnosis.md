@@ -6,7 +6,11 @@
 
 ## AI辅助方式
 
-AI 辅助梳理了 `DiagnosisContext`、`DiagnosisPromptBuilder`、Provider 和报告解析器之间的调用链，并协助检查 JSON 解析失败和外部请求失败的处理。文档不声称存在无法从代码确认的模型对话内容。
+这一阶段先确定诊断流程采用“规则初筛 + LLM 辅助分析”的方式。
+
+规则检测负责从日志中快速识别异常类型，并提供可解释的异常证据；LLM 不直接承担基础异常检测，而是基于已经整理好的上下文进一步生成原因、影响和处理建议。
+
+在方案确定后，使用 Cursor 辅助实现规则检测、`DiagnosisContext`、Prompt 构造以及结构化 LLM Provider，并通过实际运行结果不断检查和调整。
 
 ## 任务拆分
 
@@ -17,22 +21,8 @@ AI 辅助梳理了 `DiagnosisContext`、`DiagnosisPromptBuilder`、Provider 和�
 - 提供 `MockLLMProvider` 和 `SiliconFlowLLMProvider`。
 - 将普通 JSON 或 fenced JSON 解析为 `DiagnosisReport`。
 - 将有效报告保存到 Incident。
+- 保证 LLM 不可用时，规则检测仍可以独立工作。
 
-## 实现过程
-
-`app/diagnosis/context.py` 定义了 `DiagnosisContext`，并由 `collect_diagnosis_context()` 负责现场采集。`llm/diagnosis.py` 中的 Prompt Builder 只取最近有限数量的日志和匹配日志，并对状态数据中的 password、token、secret 等字段进行过滤。
-
-规则检测完成后，`DiagnosisPromptBuilder.build(context, result)` 生成要求固定字段的 JSON 输出说明。Provider 返回文本后，由 `parse_diagnosis_response()` 解析为：
-
-- `fault_type`
-- `severity`
-- `summary`
-- `probable_cause`
-- `evidence`
-- `impact`
-- `recommendations`
-
-`MockLLMProvider` 用于本地链路验证；SiliconFlow Provider 使用配置的 OpenAI 兼容接口和模型。入口会把 Provider 失败视为可记录的诊断失败，而不是假装模型已经返回有效报告。
 
 ## 人工检查
 
@@ -40,7 +30,11 @@ AI 辅助梳理了 `DiagnosisContext`、`DiagnosisPromptBuilder`、Provider 和�
 
 ## 遇到的问题
 
-真实日志可能同时包含多种关键词，规则需要先选择主故障类型；外部 LLM 还可能超时、返回 fenced JSON 或非法 JSON。若直接把模型原文当作报告，数据库和 Dashboard 都难以稳定使用。
+真实日志可能同时包含多种关键词，不能简单地把所有匹配结果直接交给模型，否则上下文容易膨胀，也难以确定当前主要异常。
+
+因此需要先由规则检测确定主要故障类型和相关证据，再将有限上下文交给 LLM。
+
+另外，外部 LLM 的响应存在不确定性，可能出现超时、fenced JSON 或非法 JSON 等情况。如果直接保存模型原始输出，后续 Incident 和 Dashboard 都难以稳定使用，因此需要增加统一的结构化解析和错误处理。
 
 ## 修复与验证
 

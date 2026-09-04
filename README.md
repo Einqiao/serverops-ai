@@ -2,7 +2,9 @@
 
 **AI 辅助服务器运维与异常诊断系统**
 
-ServerOps AI 是一个面向 DST（Don't Starve Together）服务器的外部运维分析服务。它通过 DMP 获取服务器状态和游戏日志，先用可解释规则识别异常，再使用结构化 LLM 诊断生成故障记录，并通过 Dashboard 和 Webhook 供运维人员查看或接入其他系统。 （暂且于自己的服务器中自用）
+ServerOps AI 是一个面向 DST（Don't Starve Together）服务器的外部运维分析服务。它通过 DMP 获取服务器状态和游戏日志，先使用可解释规则识别异常，再结合结构化 LLM 进行辅助诊断，并将结果沉淀为可查询的 Incident，通过 Dashboard 提供统一查看入口。
+
+> 本项目为个人实践项目，目前主要用于个人服务器环境中的实际联调与验证。
 
 ## AI Coding 过程
 
@@ -39,33 +41,43 @@ ServerOps AI 不是 DST 管理平台本身，而是运行在 DMP 之外的分析
 - 提供一个只读 Dashboard
 - 接收 DMP Webhook，并对 `keepalive_triggered` 事件进行后台诊断
 
-整个系统围绕 **“异常检测 → 上下文提取 → AI 辅助诊断 → 故障记录”** 展开。
+整个系统围绕 **“异常检测 → 上下文提取 → AI 辅助诊断 → 故障记录”** 展开，其中规则检测负责基础异常识别，LLM 负责对已发现异常进行进一步分析。
 
 ## 核心流程
 
 ```text
-DST 服务器 / DMP
-        │
-        ▼
-状态与游戏日志获取
-        │
-        ▼
-规则异常检测（RuleDetector）
-        │
-        ▼
-诊断上下文提取（DiagnosisContext）
-        │
-        ▼
-Prompt 构造与 LLM 辅助诊断
-        │
-        ▼
-结构化 DiagnosisReport
-        │
-        ▼
-Incident 持久化与重复合并
-        │
-        ├──► Dashboard
-        └──► Webhook 事件入口 / 外部系统
+DMP API
+  │
+  ├──► 状态 / 玩家 / 游戏日志
+  │
+  ▼
+Collector
+  │
+  ▼
+RuleDetector
+  │
+  ▼
+DiagnosisContext
+  │
+  ▼
+LLM 辅助诊断
+  │
+  ▼
+DiagnosisReport
+  │
+  ▼
+Incident
+  │
+  ├──► Dashboard
+  └──► 历史查询
+
+
+DMP Webhook
+  │
+  ▼
+Webhook Receiver
+  │
+  └──► 触发后台诊断流程
 ```
 
 ## 核心功能
@@ -97,13 +109,13 @@ Incident 持久化与重复合并
 - `RESOURCE`
 - `WARNING`
 
-规则结果包含故障类型、严重程度、置信度、匹配证据和相关日志行，便于后续诊断和解释。
+规则结果包含故障类型、严重程度、匹配证据和相关日志行，便于后续诊断和解释。
 
 ### LLM 辅助诊断
 
 系统采用“规则初筛 + LLM 辅助分析”的方式，而不是直接将完整日志交给模型。
 
-- `MockLLMProvider`：用于本地测试和 Demo 数据验证
+- `MockLLMProvider`：用于本地流程测试和结构化结果验证
 - `SiliconFlowLLMProvider`：调用 OpenAI 兼容的 Chat Completions 接口
 - 通过 Prompt 约束输入范围和输出结构
 - 将模型结果解析为结构化 `DiagnosisReport`
@@ -132,7 +144,6 @@ Dashboard 使用 FastAPI 内嵌 HTML/CSS/JavaScript 实现，不依赖 Vue、Rea
 - 近 7 日异常事件总数趋势
 - 最近 Incident 列表
 - Incident 的 AI 辅助诊断详情
-- Demo 数据标识
 
 页面访问地址通常为：
 
@@ -168,13 +179,14 @@ flowchart LR
 
 ## AI 诊断
 
-AI 不是直接接收整份日志。当前链路是：
+
+AI 不直接接收完整服务器日志，而是在规则初筛后使用经过限制和脱敏的上下文进行辅助分析。当前链路是：
 
 1. 先读取有限范围的服务器状态和日志
 2. 使用规则发现异常类型并提取匹配证据
 3. 组装 `DiagnosisContext`
 4. 使用 `DiagnosisPromptBuilder` 限制日志数量并过滤敏感字段
-5. 调用 Mock 或 SiliconFlow Provider
+5. 调用结构化 LLM Provider
 6. 解析 JSON 为 `DiagnosisReport`
 7. 将报告保存为 Incident
 
@@ -220,7 +232,7 @@ Dashboard 页面提供服务器运行概况、近 7 日异常趋势、最近异�
 - 使用 FastAPI 完成 Dashboard 和诊断结果展示
 - 在开发过程中使用 AI Coding 工具辅助代码阅读、模块实现、问题定位与测试修复
 
-> 项目用于展示完整的 AI 应用开发与 AI Coding 实践流程，目前仅于我的服务器使用。
+> 项目用于展示完整的 AI 应用开发与 AI Coding 实践流程，目前主要运行于个人服务器环境。
 
 ## 技术栈
 
@@ -288,13 +300,10 @@ http://127.0.0.1:8081/dashboard
 
 真实模式通过配置的 DMP 地址、账号和房间进行读取。程序会调用 DMP 获取状态、在线玩家和游戏日志；是否能读取到具体数据取决于 DMP 服务、权限和目标房间当前状态。
 
-### Demo / 演示数据
-
-`--seed-demo` 写入的是明确标记为 `demo_test_data` 的本地 SQLite 演示记录，用于展示不同故障类型、趋势和 AI 辅助诊断详情。Demo 不代表真实服务器事故，也不会替代真实 DMP 数据。
 
 ### LLM 可用性
 
-Mock Provider 可用于不访问外部模型的本地验证。SiliconFlow Provider 需要有效的环境变量密钥和可用网络；外部模型的响应速度、可用性和返回结果不由本项目保证。
+项目同时提供 Mock Provider 和 SiliconFlow Provider，分别用于本地流程验证和外部模型调用。外部模型的实际可用性取决于 API 密钥、网络和服务状态。
 
 ## 当前边界
 
