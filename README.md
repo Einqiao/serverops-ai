@@ -2,7 +2,7 @@
 
 **AI 辅助服务器运维与异常诊断系统**
 
-ServerOps AI 是一个面向 DST（Don't Starve Together）服务器的外部运维分析服务。它通过 DMP 获取服务器状态和游戏日志，先用可解释规则识别异常，再使用结构化 LLM 诊断生成故障记录，并通过 Dashboard 和 Webhook 供运维人员查看或接入其他系统。
+ServerOps AI 是一个面向 DST（Don't Starve Together）服务器的外部运维分析服务。它通过 DMP 获取服务器状态和游戏日志，先用可解释规则识别异常，再使用结构化 LLM 诊断生成故障记录，并通过 Dashboard 和 Webhook 供运维人员查看或接入其他系统。 （持续测试优化中，暂且自用）
 
 ## 项目背景
 
