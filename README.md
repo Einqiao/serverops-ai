@@ -2,7 +2,7 @@
 
 **AI 辅助服务器运维与异常诊断系统**
 
-ServerOps AI 是一个面向 DST（Don't Starve Together）服务器的外部运维分析服务。它通过 DMP 获取服务器状态和游戏日志，先用可解释规则识别异常，再使用结构化 LLM 诊断生成故障记录，并通过 Dashboard 和 Webhook 供运维人员查看或接入其他系统。 （持续测试优化中，暂且自用）
+ServerOps AI 是一个面向 DST（Don't Starve Together）服务器的外部运维分析服务。它通过 DMP 获取服务器状态和游戏日志，先用可解释规则识别异常，再使用结构化 LLM 诊断生成故障记录，并通过 Dashboard 和 Webhook 供运维人员查看或接入其他系统。 （暂且于自己的服务器中自用）
 
 ## AI Coding 过程
 
@@ -38,6 +38,8 @@ ServerOps AI 不是 DST 管理平台本身，而是运行在 DMP 之外的分析
 - 对重复的 open Incident 使用 fingerprint 合并统计
 - 提供一个只读 Dashboard
 - 接收 DMP Webhook，并对 `keepalive_triggered` 事件进行后台诊断
+
+整个系统围绕 **“异常检测 → 上下文提取 → AI 辅助诊断 → 故障记录”** 展开。
 
 ## 核心流程
 
@@ -99,12 +101,14 @@ Incident 持久化与重复合并
 
 ### LLM 辅助诊断
 
-系统提供：
+系统采用“规则初筛 + LLM 辅助分析”的方式，而不是直接将完整日志交给模型。
 
-- `MockLLMProvider`：本地验证和 Demo 使用
+- `MockLLMProvider`：用于本地测试和 Demo 数据验证
 - `SiliconFlowLLMProvider`：调用 OpenAI 兼容的 Chat Completions 接口
+- 通过 Prompt 约束输入范围和输出结构
+- 将模型结果解析为结构化 `DiagnosisReport`
 
-LLM 输出会经过 JSON 解析，形成包含故障类型、严重程度、摘要、可能原因、证据、影响和处理建议的 `DiagnosisReport`。LLM 不可用时，现有轮询链路会保留规则检测结果；这类内部状态不会作为 Dashboard 的业务摘要展示。
+诊断结果包含故障类型、严重程度、摘要、可能原因、异常证据、影响和处理建议。规则检测作为基础能力独立运行，LLM 主要负责对已发现的异常进行进一步整理和分析。
 
 ### SQLite Incident
 
@@ -206,17 +210,17 @@ Dashboard 页面提供服务器运行概况、近 7 日异常趋势、最近异�
 
 这是一个个人项目。我围绕真实的 DST/DMP 运维场景，独立完成了：
 
-- DMP API 客户端和认证流程
-- 状态与游戏日志采集
-- 可解释规则检测
-- `DiagnosisContext`、Prompt 构造和结构化诊断报告
-- Mock 与 SiliconFlow Provider 接口
-- SQLite Incident 持久化、兼容迁移和重复事件去重
-- DMP Webhook 接收与后台诊断链路
-- 面向展示和查询的 Dashboard
+- 分析 DMP 现有 API 与服务器日志能力，设计外部运维分析层
+- 实现 DMP API 客户端、认证及状态/日志采集
+- 设计并实现基于规则的异常检测机制
+- 设计 `DiagnosisContext`，整理服务器状态、日志和事件信息
+- 实现 Prompt 构造、结构化 LLM Provider 与 `DiagnosisReport`
+- 实现 SQLite Incident 持久化、兼容迁移及 fingerprint 重复事件去重
+- 实现 DMP Webhook 接收与 `keepalive_triggered` 后台诊断流程
+- 使用 FastAPI 完成 Dashboard 和诊断结果展示
+- 在开发过程中使用 AI Coding 工具辅助代码阅读、模块实现、问题定位与测试修复
 
-
-项目用于展示完整的 AI 应用流程，不代表已经完成商业化落地或大规模生产部署。
+> 项目用于展示完整的 AI 应用开发与 AI Coding 实践流程，目前仅于我的服务器使用。
 
 ## 技术栈
 
@@ -278,7 +282,7 @@ python -m app.main
 http://127.0.0.1:8081/dashboard
 ```
 
-## 项目说明
+## 开发与使用说明
 
 ### 真实服务器 / DMP 联调
 
@@ -295,6 +299,4 @@ Mock Provider 可用于不访问外部模型的本地验证。SiliconFlow Provid
 ## 当前边界
 
 - 当前项目是轻量运维分析工具，不包含自动修复、远程 Shell 执行、MOD 安装或服务器控制面板。
-- Dashboard 主要读取本地 Incident 和监控进程共享的状态快照。
 - 未提供完整的用户权限系统、任务队列或高可用部署方案。
-- 真实数据联调和 Demo 数据展示需要区分，不能把 Demo 记录当作生产故障统计。
